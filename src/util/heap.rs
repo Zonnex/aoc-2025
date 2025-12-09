@@ -64,4 +64,14 @@ impl<K: Ord, V> MinHeap<K, V> {
     pub fn peek(&self) -> Option<(&K, &V)> {
         self.heap.peek().map(|w| (&w.key, &w.value))
     }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.heap.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.heap.is_empty()
+    }
 }

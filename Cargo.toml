@@ -12,3 +12,4 @@ incremental = true
 incremental = true
 
 [dependencies]
+itertools = "*"
