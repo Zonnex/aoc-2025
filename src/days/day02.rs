@@ -1,100 +1,66 @@
-use std::collections::HashSet;
-
 pub const INPUT: &str = include_str!("../inputs/02/real.txt");
 
+type Pattern = [u32; 2];
+
+// Repeating patterns: [digits, base]
+// Pattern repeated exactly twice: [2,1]=55, [4,2]=1212, [6,3]=123123, etc.
+const P1_PATTERNS: [Pattern; 5] = [[2, 1], [4, 2], [6, 3], [8, 4], [10, 5]];
+
+// Pattern repeated 3+ times: [3,1]=111, [6,2]=121212, etc.
+const P2_PATTERNS: [Pattern; 6] = [[3, 1], [5, 1], [6, 2], [7, 1], [9, 3], [10, 2]];
+
+// Patterns to subtract (inclusion-exclusion for double counting)
+// e.g. 111111 is both [6,3] (111 twice) and [6,1] (1 six times)
+const EXCLUSION: [Pattern; 2] = [[6, 1], [10, 1]];
+
+struct Range {
+    min: u64,
+    max: u64,
+}
+
+impl Range {
+    fn parse(input: &str) -> Range {
+        let (l, r) = input.split_once('-').unwrap();
+        Range {
+            min: l.parse().unwrap(),
+            max: r.parse().unwrap(),
+        }
+    }
+}
+
 pub fn solve(input: &str) -> (u64, u64) {
-    let p1 = p1(input);
-    let p2 = p2(input);
+    let ranges = input.split(',').map(Range::parse).collect::<Vec<_>>();
+
+    let p1 = compute(&P1_PATTERNS, &ranges);
+    let p2 = p1 + compute(&P2_PATTERNS, &ranges) - compute(&EXCLUSION, &ranges);
 
     (p1, p2)
 }
 
-type Range = (u64, u64);
+fn compute(patterns: &[Pattern], ranges: &[Range]) -> u64 {
+    let mut sum = 0;
 
-fn p1(input: &str) -> u64 {
-    input
-        .split(',')
-        .map(|range| range.split_once('-').expect("valid range"))
-        .map(|(min, max)| (min.parse().unwrap(), max.parse().unwrap()))
-        .map(shrink_range)
-        .map(|(min, max)| {
-            if min >= max {
-                return 0;
+    for &[digits, base_digits] in patterns {
+        let digits = u64::pow(10, digits);
+        let base = u64::pow(10, base_digits);
+
+        let step = (digits - 1) / (base - 1);
+        let start = step * (base / 10);
+        let end = step * (base - 1);
+
+        for r in ranges {
+            let lower = u64::max(r.min.next_multiple_of(step), start);
+            let upper = u64::min(r.max, end);
+
+            if lower <= upper {
+                let n = (upper - lower) / step;
+                let triangular = n * (n + 1) / 2;
+                sum += lower * (n + 1) + step * triangular;
             }
-            let mut current = min / 10_u64.pow(digits(min) / 2);
-            let mut sum = 0;
-            loop {
-                let d = digits(current);
-                let power = 10_u64.pow(d);
-                let repeated = current * power + current;
-
-                if max < repeated {
-                    break;
-                }
-
-                if repeated < min {
-                    current += 1;
-                    continue;
-                }
-
-                if repeated <= max {
-                    sum += repeated;
-                }
-                current += 1;
-            }
-            sum
-        })
-        .sum::<u64>()
-}
-
-fn shrink_range((min, max): Range) -> (u64, u64) {
-    let d_min = digits(min);
-    let min = match d_min % 2 == 1 {
-        true => 10_u64.pow(d_min),
-        false => min,
-    };
-
-    let d_max = digits(max);
-    let max = match d_max % 2 == 1 {
-        true => 10_u64.pow(d_max - 1) - 1,
-        false => max,
-    };
-
-    (min, max)
-}
-
-fn digits(x: u64) -> u32 {
-    if x == 0 {
-        return 1;
+        }
     }
-    x.ilog10() + 1
-}
 
-fn p2(input: &str) -> u64 {
-
-    input
-        .split(',')
-        .map(|line| {
-            let (l, r) = line.split_once('-').unwrap();
-            let l = l.parse().unwrap();
-            let r = r.parse().unwrap();
-
-            let mut seen = HashSet::new();
-            for base_digits in 1..=10 {
-                let base_min = 10_u64.pow(base_digits - 1).max(1);
-                let base_max = 10_u64.pow(base_digits);
-
-                for reps in 2..=20 / base_digits {
-                    for base in base_min..base_max {
-                        let num: u64 = base.to_string().repeat(reps as usize).parse().unwrap();
-                        if num > r { break; }
-                        if num >= l { seen.insert(num); }
-                    }
-                }
-            }
-            seen.into_iter().sum::<u64>()
-        })
-        .sum()
+    sum
 }
 
 #[cfg(test)]
