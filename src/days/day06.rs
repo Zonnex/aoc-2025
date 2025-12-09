@@ -31,16 +31,16 @@ fn part1<const N: usize>(input: &str) -> u64 {
         }
     }
 
-    let sum = columns
+    
+
+    columns
         .into_iter()
         .map(|c| match c.operator {
             Operator::Add => c.values.into_iter().sum::<u64>(),
             Operator::Mul => c.values.into_iter().product::<u64>(),
             Operator::Unspecified => panic!("Error in algorithm"),
         })
-        .sum();
-
-    sum
+        .sum()
 }
 
 enum Operator {

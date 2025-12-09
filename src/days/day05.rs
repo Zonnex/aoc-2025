@@ -12,7 +12,7 @@ pub fn solve(input: &str) -> (usize, u64) {
                     return true;
                 }
             }
-            return false;
+            false
         })
         .count();
 
