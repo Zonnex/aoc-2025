@@ -1,6 +1,7 @@
 use itertools::Itertools;
-use std::{collections::HashSet, ops::Sub};
+use std::{mem, ops::Sub};
 
+use crate::util::hash::{FastSet, FastSetBuilder};
 use crate::util::heap::MinHeap;
 
 pub const INPUT: &str = include_str!("../inputs/08/real.txt");
@@ -44,8 +45,8 @@ fn run<const PAIRS: usize>(input: &str) -> (usize, i64) {
         heap.push(a.distance_sq(*b), (*a, *b));
     }
 
-    let mut circuits: Vec<HashSet<Point3D>> = points.into_iter()
-        .map(|p| HashSet::from([p]))
+    let mut circuits: Vec<FastSet<Point3D>> = points.into_iter()
+        .map(|p| FastSet::build([p]))
         .collect();
 
     let mut p1 = 0;
@@ -57,33 +58,21 @@ fn run<const PAIRS: usize>(input: &str) -> (usize, i64) {
         };
         pops += 1;
 
-        let circuit_a = circuits.iter().position(|c| c.contains(&a));
-        let circuit_b = circuits.iter().position(|c| c.contains(&b));
+        let index_1 = circuits.iter().position(|c| c.contains(&a)).unwrap();
+        let index_2 = circuits.iter().position(|c| c.contains(&b)).unwrap();
 
-        match (circuit_a, circuit_b) {
-            (Some(ia), Some(ib)) if ia == ib => {}
-            (Some(ia), Some(ib)) => {
-                let (keep, remove) = (ia.min(ib), ia.max(ib));
-                let merged = circuits.remove(remove);
-                circuits[keep].extend(merged);
-            }
-            (Some(idx), None) => {
-                circuits[idx].insert(b);
-            }
-            (None, Some(idx)) => {
-                circuits[idx].insert(a);
-            }
-            (None, None) => {
-                circuits.push(HashSet::from([a, b]));
-            }
+        if index_1 != index_2 {
+            let nodes = mem::take(&mut circuits[index_2]);
+            circuits[index_1].extend(nodes);
         }
 
         if pops == PAIRS {
+            circuits.retain(|c| !c.is_empty());
             circuits.sort_by_key(|c| c.len());
             p1 = circuits.iter().rev().take(3).map(|c| c.len()).product();
         }
 
-        if circuits.len() == 1 {
+        if circuits.iter().filter(|c| !c.is_empty()).count() == 1 {
             p2 = a.0 * b.0;
             break;
         }
