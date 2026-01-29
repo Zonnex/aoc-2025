@@ -1,122 +1,181 @@
+//! # Day 10: Factory Joltage Puzzle
+//!
+//! ## The Problem
+//! We have buttons that toggle lights (Part 1) and reduce joltages (Part 2).
+//! Each button affects a subset of 16 positions. We need to find the minimum
+//! button presses to reach target states.
+//!
+//! ## The "Bifurcate" Algorithm (Part 2)
+//!
+//! The key insight is that we can solve this recursively by "bifurcating" -
+//! dividing the problem in half at each step.
+//! Inspired by <https://www.reddit.com/r/adventofcode/comments/1pk87hl/2025_day_10_part_2_bifurcate_your_way_to_victory>/
+//! 
+//! ### Core Observation
+//! If we press a set of buttons that:
+//! 1. Makes all joltages even (by matching odd parities via XOR)
+//! 2. Subtracts the right amounts so we can divide by 2
+//!
+//! Then: `f(joltages) = min(button_count + 2 * f(joltages_after_divide))`
+//!
+//! ### Example
+//! Joltages: [6, 3, 4]  (binary: 110, 011, 100)
+//! Parities: [0, 1, 0]  (need buttons `XORing` to 010 to make all even)
+//!
+//! Say button B toggles position 1 and subtracts 1 from position 1:
+//! - After B: [6, 2, 4] - all even!
+//! - Divide by 2: [3, 1, 2]
+//! - Recurse to solve [3, 1, 2], say it needs K presses
+//! - Total: 1 + 2*K presses
+//!
+//! At each DFS call, iterate through all 2^n button combinations
+//! to find ones matching the target XOR pattern.
+//!
+//! PRECOMPUTE all button combinations once per puzzle line,
+//! grouping them by their XOR pattern into an array:
+//!
+//! ```text
+//! mask_to_combos[xor_pattern] = [(count, diff), (count, diff), ...]
+//! ```
+
+use crate::util::hash::*;
+use crate::util::parse::*;
+
 pub const INPUT: &str = include_str!("../inputs/10/real.txt");
 
-// [.##.] (3) (1,3) (2) (2,3) (0,2) (0,1) {3,5,4,7}
-// [lights]
-// (buttons)
-// {joltage requirement}
+pub fn solve(input: &str) -> (usize, u64) {
+    let mut p1 = 0;
+    let mut p2 = 0;
 
-pub fn solve(input: &str) -> (usize, usize) {    
-    let p1 = p1(input);
-    let p2 = p2(input);
+    // Reusable buffers
+    let mut buttons = Vec::with_capacity(16);
+    let mut button_diffs = Vec::with_capacity(16);
+    let mut mask_to_combos: [Vec<(u32, [u16; 16])>; 1024] = std::array::from_fn(|_| Vec::new());
+    let mut cache = FastMap::new();
 
-    (p1, p2)
-}
-
-fn p1(input: &str) -> usize {
-    let mut sum = 0;
-    let mut button_buffer: Vec<u16> = Vec::with_capacity(10);
     for line in input.lines() {
-        let mut pattern = 0;
+        buttons.clear();
+        button_diffs.clear();
+        
+        let mut lights = 0_u16;
+        let mut joltages = [0_u16; 16];
+
         for part in line.split_whitespace() {
             match part.as_bytes()[0] {
                 b'[' => {
-                    for (i, b) in part.trim_matches(&['[', ']']).as_bytes().iter().enumerate() {
-                        match b {
-                            b'#' => pattern |= 1 << i,
-                            _ => continue,
+                    for (i, &b) in part[1..part.len()-1].as_bytes().iter().enumerate() {
+                        if b == b'#' {
+                            lights |= 1 << i;
                         }
                     }
                 }
                 b'(' => {
-                    let button = parse_button(part);
-                    button_buffer.push(button);
+                    let mut mask = 0_u16;
+                    let mut diff = [0_u16; 16];
+                    for idx in part.iter_unsigned::<usize>() {
+                        mask |= 1 << idx;
+                        diff[idx] = 1;
+                    }
+                    buttons.push(mask);
+                    button_diffs.push(diff);
                 }
                 b'{' => {
-                    continue; // ignored in part 1
+                    for (i, val) in part.iter_unsigned::<u16>().enumerate() {
+                        joltages[i] = val;
+                    }
                 }
-                _ => unreachable!(),
+                _ => {}
             }
         }
 
-        sum += test_machine(pattern, &button_buffer);
+        // Precompute all button combinations grouped by XOR mask
+        for combos in &mut mask_to_combos {
+            combos.clear();
+        }
+        precompute_combos(&buttons, &button_diffs, &mut mask_to_combos);
 
-        button_buffer.clear();
+        p1 += mask_to_combos[lights as usize]
+            .iter()
+            .map(|(count, _)| *count as usize)
+            .min()
+            .expect("to have a valid count");
+
+        cache.clear();
+        p2 += dfs(&mask_to_combos, &mut cache, joltages);
     }
-    sum
+
+    (p1, p2)
 }
 
-#[inline]
-fn parse_button(pattern: &str) -> u16 {
-    // produce a bitmask.
-    // if a button is (2,3), then we can precompute it as 0011
-    // which makes XOR'ing simple
-    pattern
-        .bytes()
-        .filter(|b| b.is_ascii_digit())
-        .fold(0u16, |acc, b| acc | (1 << (b - b'0')))
-}
-
-fn test_machine(pattern: u16, buttons: &[u16]) -> usize {
+/// Precompute all 2^n button combinations, storing (count, diff) grouped by XOR mask
+fn precompute_combos(
+    buttons: &[u16],
+    button_diffs: &[[u16; 16]],
+    mask_to_combos: &mut [Vec<(u32, [u16; 16])>; 1024],
+) {
     let n = buttons.len();
-    let limit = 1 << n;
+    for combo in 0..(1_u32 << n) {
+        let mut xor_mask = 0_usize;
+        let mut diff = [0_u16; 16];
+        let mut count = 0_u32;
 
-    // Test by number of buttons pressed (1, 2, 3, ...)
-    for button_presses in 1..=n {
-        // Start with the smallest number that has exactly num_buttons bits set
-        // e.g., num_buttons=1 -> 0b001, num_buttons=2 -> 0b011, num_buttons=3 -> 0b111
-        let mut buttons_to_press: u32 = (1 << button_presses) - 1;
-
-        while buttons_to_press < limit {
-            // using buttons_to_press we can pull out the buttons we should press
-            let mut test = 0u16;
-            for i in 0..n {
-                if buttons_to_press & (1 << i) != 0 {
-                    test ^= buttons[i];  // Just XOR the precomputed bitmask!
+        for i in 0..n {
+            if combo & (1 << i) != 0 {
+                xor_mask ^= buttons[i] as usize;
+                count += 1;
+                for j in 0..16 {
+                    diff[j] += button_diffs[i][j];
                 }
             }
-            if test == pattern {
-                return button_presses;
-            }
+        }
 
-            // Gosper's hack: get next number with same popcount
-            let lowest_bit = buttons_to_press & buttons_to_press.wrapping_neg();
-            let ripple = buttons_to_press + lowest_bit;
-            let ones = (buttons_to_press ^ ripple) >> (lowest_bit.trailing_zeros() + 2);
-            buttons_to_press = ripple | ones;
+        mask_to_combos[xor_mask].push((count, diff));
+    }
+}
+
+fn dfs(
+    mask_to_combos: &[Vec<(u32, [u16; 16])>; 1024],
+    cache: &mut FastMap<[u16; 16], u64>,
+    joltages: [u16; 16],
+) -> u64 {
+    if joltages == [0; 16] {
+        return 0;
+    }
+
+    if let Some(&result) = cache.get(&joltages) {
+        return result;
+    }
+
+    let mut pattern = 0_usize;
+    for i in 0..16 {
+        pattern |= (joltages[i] as usize & 1) << i;
+    }
+
+    const INF: u64 = 1_000_000;
+    let mut best = INF;
+
+    for &(count, diff) in &mask_to_combos[pattern] {
+        let mut valid = true;
+        let mut next = [0_u16; 16];
+        for i in 0..16 {
+            if diff[i] > joltages[i] {
+                valid = false;
+                break;
+            }
+            next[i] = (joltages[i] - diff[i]) / 2;
+        }
+        if !valid {
+            continue;
+        }
+
+        let sub = dfs(mask_to_combos, cache, next);
+        if sub < INF {
+            best = best.min(2 * sub + count as u64);
         }
     }
 
-    unreachable!("Error in code")
-}
-
-fn p2(input: &str) -> usize {
-    // Here we most definitely want to use BFS.
-    // we can again encode the buttons nicely but this time using base 10
-    // so the button (2,3) would be 0011, so 11.
-    // button (0,1) would be 1100
-    // this allows us to do good pruning of branches.
-    // As soon as any digit exceeds the target we quit.
-    // example: 1999, we can only ever increment the first counter once
-    // any combination that exceeds 1 in this position is an invalid branch
-
-    // for line in input.lines() {
-    //     for part in line.split_whitespace() {
-    //         match part.as_bytes()[0] {
-    //             b'[' => continue, // ignored in part 2
-    //             b'(' => {
-    //                 let button = parse_button(part);
-    //                 button_buffer.push(button);
-    //             }
-    //             b'{' => {
-    //                 continue; // ignored for now
-    //             }
-    //             _ => unreachable!(),
-    //         }
-    //     }
-
-    // }
-
-    0
+    cache.insert(joltages, best);
+    best
 }
 
 #[cfg(test)]

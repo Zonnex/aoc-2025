@@ -62,7 +62,7 @@ fn dfs<'a>(
     };
 
     if current == "out" {
-        return if checkpoints == 0b11 { 1 } else { 0 };
+        return u64::from(checkpoints == 0b11);
     }
 
     if let Some(&result) = cache.get(&(current, checkpoints)) {
@@ -71,13 +71,12 @@ fn dfs<'a>(
 
     let paths = connections
         .get(current)
-        .map(|outputs| {
+        .map_or(0, |outputs| {
             outputs
                 .iter()
                 .map(|&next| dfs(next, checkpoints, connections, cache))
                 .sum()
-        })
-        .unwrap_or(0);
+        });
 
     cache.insert((current, checkpoints), paths);
     paths
@@ -97,22 +96,5 @@ mod tests {
 
         assert_eq!(p1, 5);
         assert_eq!(p2, 2);
-    }
-
-    #[test]
-    fn test_im_path() {
-        let mut path = im_rc::HashSet::new();
-        path = path.update("svr")
-            .update("aaa")
-            .update("fft")
-            .update("ccc")
-            .update("eee")
-            .update("dac")
-            .update("fff")
-            .update("ggg")
-            .update("out");
-
-        assert!(path.contains("fft"));
-        assert!(path.contains("dac"));
     }
 }

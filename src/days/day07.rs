@@ -1,5 +1,5 @@
 use crate::util::grid::Grid;
-use crate::util::hash::{FastMap, FastMapBuilder, FastSet, FastSetBuilder};
+use crate::util::hash::{FastMap, FastMapBuilder as _, FastSet, FastSetBuilder as _};
 use crate::util::point::Point;
 
 pub const INPUT: &str = include_str!("../inputs/07/real.txt");

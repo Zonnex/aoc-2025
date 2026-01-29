@@ -1,83 +1,103 @@
-use itertools::Itertools;
-use std::{mem, ops::Sub};
+//! # Playground
+//!
+//! Kruskal's algorithm to build a minimum spanning tree by processing edges
+//! (pairs of points) in order of increasing distance.
+//!
+//! ## Optimization: Bucket Sort
+//! Instead of using a min-heap for all O(n²) pairs, we bucket pairs by distance
+//! into 5 ranges. Each bucket is sorted independently. This avoids heap overhead
+//! during pair generation and exploits the fact that we only need approximate
+//! ordering until we actually process the pairs.
+//!
+//! ## Union-Find
+//! Track connected components with union-find (disjoint set) with path compression
+//! and union-by-size for near O(1) amortized operations.
+//!
+//! - Part 1: Product of the 3 largest component sizes after 1000 edges processed
+//! - Part 2: Product of x-coordinates when all points merge into one component
 
-use crate::util::hash::{FastSet, FastSetBuilder};
-use crate::util::heap::MinHeap;
+use crate::util::iter::ChunkOps as _;
+use crate::util::parse::ParseOps as _;
 
 pub const INPUT: &str = include_str!("../inputs/08/real.txt");
 
-#[derive(Clone, Copy, Hash, Eq, PartialEq)]
-struct Point3D(i64, i64, i64);
+type Point = [usize; 3];
+type Pair = (u16, u16, usize);
 
-impl Point3D {
-    fn parse(line: &str) -> Point3D {
-        let mut iter = line.split(',').flat_map(str::parse);
-        Point3D(
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-            iter.next().unwrap(),
-        )
+const BUCKETS: usize = 5;
+const BUCKET_SIZE: usize = 100_000_000; // 10_000^2
+
+pub fn solve(input: &str) -> (usize, usize) {
+    let points: Vec<Point> = input.iter_unsigned().chunk::<3>().collect();
+    let mut buckets: Vec<Vec<Pair>> = vec![vec![]; BUCKETS];
+
+    for (i, &p1) in points.iter().enumerate() {
+        for (j, &p2) in points.iter().enumerate().skip(i + 1) {
+            let dx = p1[0].abs_diff(p2[0]);
+            let dy = p1[1].abs_diff(p2[1]);
+            let dz = p1[2].abs_diff(p2[2]);
+            let dist = dx * dx + dy * dy + dz * dz;
+            let bucket = (dist / BUCKET_SIZE).min(BUCKETS - 1);
+            buckets[bucket].push((i as u16, j as u16, dist));
+        }
     }
 
-    fn distance_sq(self, other: Self) -> u64 {
-        let d = self - other;
-        (d.0 * d.0 + d.1 * d.1 + d.2 * d.2) as u64
+    // Sort each bucket by distance
+    for bucket in &mut buckets {
+        bucket.sort_unstable_by_key(|&(.., d)| d);
     }
+
+    let (p1, p2) = run::<1000>(&points, &buckets);
+    (p1, p2)
 }
 
-impl Sub for Point3D {
-    type Output = Point3D;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        Point3D(self.0 - rhs.0, self.1 - rhs.1, self.2 - rhs.2)
-    }
-}
-
-pub fn solve(input: &str) -> (usize, i64) {
-    run::<1000>(input)
-}
-
-fn run<const PAIRS: usize>(input: &str) -> (usize, i64) {
-    let points: Vec<_> = input.lines().map(Point3D::parse).collect();
-
-    let mut heap = MinHeap::with_capacity(points.len() * points.len() / 2);
-    for (a, b) in points.iter().tuple_combinations() {
-        heap.push(a.distance_sq(*b), (*a, *b));
-    }
-
-    let mut circuits: Vec<FastSet<Point3D>> = points.into_iter()
-        .map(|p| FastSet::build([p]))
-        .collect();
+fn run<const PAIRS: usize>(points: &[Point], buckets: &[Vec<Pair>]) -> (usize, usize) {
+    let n = points.len();
+    let mut parent: Vec<usize> = (0..n).collect();
+    let mut size: Vec<usize> = vec![1; n];
 
     let mut p1 = 0;
-    let mut p2 = 0;
     let mut pops = 0;
-    loop {
-        let Some((_, (a, b))) = heap.pop() else {
-            break;
-        };
+
+    for &(i, j, _) in buckets.iter().flat_map(|b| b.iter()) {
+        let (i, j) = (i as usize, j as usize);
         pops += 1;
 
-        let index_1 = circuits.iter().position(|c| c.contains(&a)).unwrap();
-        let index_2 = circuits.iter().position(|c| c.contains(&b)).unwrap();
-
-        if index_1 != index_2 {
-            let nodes = mem::take(&mut circuits[index_2]);
-            circuits[index_1].extend(nodes);
-        }
+        let merged_size = union(&mut parent, &mut size, i, j);
 
         if pops == PAIRS {
-            circuits.retain(|c| !c.is_empty());
-            circuits.sort_by_key(|c| c.len());
-            p1 = circuits.iter().rev().take(3).map(|c| c.len()).product();
+            let mut sizes: Vec<_> = (0..n).filter(|&x| parent[x] == x).map(|x| size[x]).collect();
+            sizes.sort_unstable_by(|a, b| b.cmp(a));
+            p1 = sizes.iter().take(3).product();
         }
 
-        if circuits.iter().filter(|c| !c.is_empty()).count() == 1 {
-            p2 = a.0 * b.0;
-            break;
+        if merged_size == n {
+            return (p1, points[i][0] * points[j][0]);
         }
     }
-    (p1, p2)
+
+    (p1, 0)
+}
+
+fn find(parent: &mut [usize], mut x: usize) -> usize {
+    while parent[x] != x {
+        let p = parent[x];
+        parent[x] = parent[p]; // path compression
+        x = p;
+    }
+    x
+}
+
+fn union(parent: &mut [usize], size: &mut [usize], x: usize, y: usize) -> usize {
+    let (mut rx, mut ry) = (find(parent, x), find(parent, y));
+    if rx != ry {
+        if size[rx] < size[ry] {
+            (rx, ry) = (ry, rx);
+        }
+        parent[ry] = rx;
+        size[rx] += size[ry];
+    }
+    size[rx]
 }
 
 #[cfg(test)]
@@ -88,7 +108,24 @@ mod tests {
 
     #[test]
     fn test_with_example() {
-        let (p1, p2) = run::<10>(TEST);
+        let points: Vec<Point> = TEST.iter_unsigned().chunk::<3>().collect();
+        let mut buckets: Vec<Vec<Pair>> = vec![vec![]; BUCKETS];
+
+        for (i, &p1) in points.iter().enumerate() {
+            for (j, &p2) in points.iter().enumerate().skip(i + 1) {
+                let dx = p1[0].abs_diff(p2[0]);
+                let dy = p1[1].abs_diff(p2[1]);
+                let dz = p1[2].abs_diff(p2[2]);
+                let dist = dx * dx + dy * dy + dz * dz;
+                let bucket = (dist / BUCKET_SIZE).min(BUCKETS - 1);
+                buckets[bucket].push((i as u16, j as u16, dist));
+            }
+        }
+        for bucket in &mut buckets {
+            bucket.sort_unstable_by_key(|&(.., d)| d);
+        }
+
+        let (p1, p2) = run::<10>(&points, &buckets);
         assert_eq!(p1, 40);
         assert_eq!(p2, 25272);
     }

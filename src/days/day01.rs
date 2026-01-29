@@ -4,7 +4,7 @@ pub fn solve(input: &str) -> (i32, i32) {
     let mut p1 = 0;
     let mut p2 = 0;
     let mut dial = 50;
-    for line in input.split("\n") {
+    for line in input.split('\n') {
         let delta = parse_line(line);
 
         if delta >= 0 {

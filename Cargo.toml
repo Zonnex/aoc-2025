@@ -12,5 +12,4 @@ incremental = true
 incremental = true
 
 [dependencies]
-im-rc = "*"
 itertools = "*"

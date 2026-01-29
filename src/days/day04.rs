@@ -1,4 +1,4 @@
-use crate::util::hash::{FastSet, FastSetBuilder};
+use crate::util::hash::{FastSet, FastSetBuilder as _};
 use crate::util::point::{self, Point};
 
 pub const INPUT: &str = include_str!("../inputs/04/real.txt");

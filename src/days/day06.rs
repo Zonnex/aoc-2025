@@ -12,13 +12,10 @@ fn part1<const N: usize>(input: &str) -> u64 {
     for (y, line) in input.lines().enumerate().take(N) {
         for (x, column) in line.split_whitespace().enumerate() {
             let number = column.parse::<u64>().unwrap();
-            match columns.get_mut(x) {
-                Some(c) => c.values[y] = number,
-                None => {
-                    let mut c = Column::default();
-                    c.values[y] = number;
-                    columns.push(c);
-                }
+            if let Some(c) = columns.get_mut(x) { c.values[y] = number } else {
+                let mut c = Column::default();
+                c.values[y] = number;
+                columns.push(c);
             }
         }
     }
@@ -64,7 +61,7 @@ impl<const N: usize> Default for Column<N> {
 }
 
 fn part2<const N: usize>(input: &str) -> u64 {
-    let grid = input.lines().map(|l| l.as_bytes()).collect::<Vec<_>>();
+    let grid = input.lines().map(str::as_bytes).collect::<Vec<_>>();
     let operator_line = grid[N];
     let grid_width = operator_line.len() - 1;
 
@@ -73,7 +70,7 @@ fn part2<const N: usize>(input: &str) -> u64 {
     let mut x_iter = (0..=grid_width).rev();
 
     while let Some(x) = x_iter.next() {
-        let mut num = 0u64;
+        let mut num = 0_u64;
         for y in 0..N {
             let byte = grid[y][x];
             if byte.is_ascii_digit() {

@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-/// Macro to declare all days and generate the solve_day dispatcher.
+/// Macro to declare all days and generate the `solve_day` dispatcher.
 ///
 /// Each day module must export:
 /// - `pub const INPUT: &str` - the puzzle input
